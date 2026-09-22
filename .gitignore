@@ -1,0 +1,27 @@
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# Build output
+bin/
+obj/
+
+# Test results
+TestResults/
+
+# Rider
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# User-specific ASP.NET settings
+appsettings.Development.json
+
+# Local secrets
+secrets.json
+
+# Local database configuration
+appsettings.json
