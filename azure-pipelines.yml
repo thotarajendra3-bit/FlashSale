@@ -14,18 +14,29 @@ variables:
 
 steps:
 
+# ---------------------------------------------------------
+# 1. Install .NET 8
+# ---------------------------------------------------------
 - task: UseDotNet@2
   displayName: 'Install .NET 8 SDK'
   inputs:
     packageType: 'sdk'
     version: '8.0.x'
 
+
+# ---------------------------------------------------------
+# 2. Restore NuGet packages
+# ---------------------------------------------------------
 - task: DotNetCoreCLI@2
   displayName: 'Restore NuGet packages'
   inputs:
     command: 'restore'
     projects: '**/*.csproj'
 
+
+# ---------------------------------------------------------
+# 3. Build solution
+# ---------------------------------------------------------
 - task: DotNetCoreCLI@2
   displayName: 'Build solution'
   inputs:
@@ -33,13 +44,74 @@ steps:
     projects: '**/*.csproj'
     arguments: '--configuration $(buildConfiguration) --no-restore'
 
+
+# ---------------------------------------------------------
+# 4. Start temporary PostgreSQL
+# ---------------------------------------------------------
+- script: |
+    docker run -d \
+      --name flashsale-postgres \
+      -e POSTGRES_USER=postgres \
+      -e POSTGRES_PASSWORD=postgres \
+      -e POSTGRES_DB=FlashSaleDb \
+      -p 5432:5432 \
+      postgres:16
+
+    echo "Waiting for PostgreSQL to start..."
+
+    for i in {1..30}
+    do
+      docker exec flashsale-postgres \
+        pg_isready -U postgres -d FlashSaleDb && break
+
+      echo "PostgreSQL is not ready yet..."
+      sleep 2
+    done
+
+    docker exec flashsale-postgres \
+      pg_isready -U postgres -d FlashSaleDb
+  displayName: 'Start temporary PostgreSQL'
+
+
+# ---------------------------------------------------------
+# 5. Install Entity Framework CLI
+# ---------------------------------------------------------
+- script: |
+    dotnet tool install --global dotnet-ef --version 8.*
+    export PATH="$PATH:$HOME/.dotnet/tools"
+    dotnet ef --version
+  displayName: 'Install EF Core CLI'
+
+
+# ---------------------------------------------------------
+# 6. Create database schema using EF migrations
+# ---------------------------------------------------------
+- script: |
+    export PATH="$PATH:$HOME/.dotnet/tools"
+
+    dotnet ef database update \
+      --project FlashSale.Api/FlashSale.Api.csproj
+  displayName: 'Apply EF Core migrations'
+  env:
+    ConnectionStrings__DefaultConnection: 'Host=localhost;Port=5432;Database=FlashSaleDb;Username=postgres;Password=postgres'
+
+
+# ---------------------------------------------------------
+# 7. Run xUnit tests
+# ---------------------------------------------------------
 - task: DotNetCoreCLI@2
   displayName: 'Run tests'
   inputs:
     command: 'test'
     projects: '**/FlashSale.Tests.csproj'
     arguments: '--configuration $(buildConfiguration) --no-build'
+  env:
+    ConnectionStrings__DefaultConnection: 'Host=localhost;Port=5432;Database=FlashSaleDb;Username=postgres;Password=postgres'
 
+
+# ---------------------------------------------------------
+# 8. Publish API
+# ---------------------------------------------------------
 - task: DotNetCoreCLI@2
   displayName: 'Publish API'
   inputs:
@@ -49,6 +121,10 @@ steps:
     arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/publish --no-build'
     zipAfterPublish: true
 
+
+# ---------------------------------------------------------
+# 9. Deploy to Azure App Service
+# ---------------------------------------------------------
 - task: AzureWebApp@1
   displayName: 'Deploy to Azure App Service'
   inputs:
@@ -56,5 +132,3 @@ steps:
     appType: 'webAppLinux'
     appName: 'flashsale-api-rajendra'
     package: '$(Build.ArtifactStagingDirectory)/publish/*.zip'
-    
-    
